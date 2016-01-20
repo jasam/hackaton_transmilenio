@@ -1,0 +1,19 @@
+```{r}
+library(leaflet)
+setwd("F:/data/transmilenio/Datos")
+load("data_summary_station.rda")
+
+m <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addMarkers(lng=-74.145835, lat=4.633313, popup="La rancha") %>%
+  addCircles(-74.145835, 4.633313, radius = runif(50, 50, 150), color = "red")
+m
+
+df = data.frame(lat = 4.603118, long = -74.079207, popup = "1,545,253")
+df = rbind(df, data.frame(lat = 4.631324, long = -74.146048, popup = "1,325,561"))
+
+m <- leaflet(df) %>% addTiles()
+m %>%addMarkers(lng=~long, lat=~lat, popup=~popup)
+```
+
+latitude:4.603118,longitude:-74.079207

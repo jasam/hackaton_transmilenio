@@ -1,0 +1,198 @@
+---
+title: "Hackaton Urbano Bogotá 2015 - Evasión de pago transmilenio."
+author: "Javier Rey - jreyro@gmail.com"
+date: "7 de noviembre de 2015"
+output:
+  html_document:
+    theme: cerulean
+---
+
+El fenómeno de la evasión de pago en TransMilenio, popularmente conocido como "colarse" ha venido en aumento en los últimos años en Bogotá. Aunque se han implementado múltiples iniciativas para frenar esta práctica, tales como multas, puertas 'anti-colados' y campañas educativas como "Tu vida vale más", un gran número de personas sigue ingresando al sistema sin pagar el tiquete. Esta situación ha generado un problema importante de seguridad vial, pues varias personas han muerto intentando evadir el pago. Adicionalmente, este problema también afecta las finanzas de TransMilenio, dado que se ha estimado que la evasión le cuesta al sistema 1.700 millones de pesos mensuales. Con el fin de enfocar adecuadamente las políticas y decisiones sobre este tema es necesario conocer el porcentaje de usuarios que ingresa sin pagar al sistema y en qué estaciones ocurre más, así como plantear una manera de reducir el problema.
+
+[tomado de: Handbook para participantes]
+
+### 1. Datos
+
+* Entradas y salidas por torniquete. Fases I y II, 2011, 2012, 2013, 2014 (Mayo y septiembre), formato excel, información distribuida por rangos de 5 días y los registros en los archivos estan por cada 15 minutos, esta información recibida directamente por **Transmilenio S.A**.
+
+* ABC de estaciones y torniquetes. Fases I y II.
+
+### 2. Preprocesamiento
+
+Teniendo en cuenta que los archivos entregados se encuentran en formato excel, el cual es un formato binario, resulta mas conveniente trabajar estos como archivos separados por comas, usando **Python** se realiza un proceso automático para convertir todos estos archivos excel a formato **csv** el cual es mas comodo para ser manipulado con los paquetes de **R**.
+
+Nota: En este documento no se adjunta los procedimientos realizados en Python.
+
+Nota: En R en particular existen muchas maneras de lograr los objetivos, así que a continuación el código que viene es una de las maneras en que se puede lograr la meta.
+
+```{r}
+library(plyr)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(leaflet)
+```
+
+
+### 3. Utilitario para lectura masiva de archivos csv
+
+```{r}
+get_dataframe <- function(dir, cols) {
+  library(readr)
+  directory <- dir
+  setwd(directory)
+  files <- list.files(pattern = "\\.csv$")
+  mega_data <- data.frame()
+  for (i in files) {
+    print(file.path(directory,i))
+    data <- read_csv(i)
+    colnames(data) <- cols
+    data <- subset(data, select = c(CODIGO, CANTIDAD, S, FECHAINICIAL, FECHAFINAL))
+    mega_data = rbind(mega_data, data)
+  }
+  return(mega_data)
+}
+
+```
+
+### 4. Carga de datos 
+
+Se procede a realizar la carga de los archivos creando un set de datos para el mes de mayo de 2014.
+
+```{r}
+setwd("F:/data/transmilenio/Datos")
+load("data_may_2014.rda")
+if (!exists("data_may_2014")) {
+  #may 2014
+  dir <- "F:/data/transmilenio/Datos/DATOS TRANSMILENIO/F1 Y F2 2014/MAYO"
+  cols <- c("FILA","CODIGO","ESTACION","NUMEROMOLINETE","FECHAINICIAL","FECHAFINA    L","S","CANTIDAD")
+  data_may_2014 <- get_dataframe(dir, cols)
+  data_may_2014$mes_ano <- "may_2014"
+  #names
+  colnames(data_may_2014) <- c("estacion", "cantidad", "ent_sal", "fechainicial", "fechafinal","mes_ano")
+  #save data
+  setwd("F:/data/transmilenio/Datos")
+  save(data_may_2014, file="data_may_2014.rda") 
+}
+```
+
+### 5. Sumarización información
+
+```{r}
+data_summary <- data_may_2014 %>% 
+                group_by(ent_sal) %>% 
+                summarise(cantidad = sum(cantidad))
+```
+
+### 6. ¿Cuantos viajes se realizaron en mayo del 2014 en transmilenio para fase I y II?
+
+```{r}
+viajes <- data_summary[data_summary$ent_sal == "S", 2]
+format(viajes, digits=8, big.mark=",")
+```
+
+### 7. ¿Cuantos viajes fueron evasión de pago y el porcentaje del total de viajes?
+
+```{r}
+colados <- data_summary[[2]][[2]] - data_summary[[2]][[1]]
+format(colados, digits=8, big.mark=",")
+```
+
+### 7. ¿Cuál fue el porcentaje de evasión de pago(colados) en mayo de 2014?
+```{r}
+viajes <- data_summary[[2]][[2]]
+porcentaje <- ((data_summary[[2]][[2]] - data_summary[[2]][[1]]) / viajes) * 100
+porcentaje
+```
+
+### 8. ¿Cuál es comportamiento de colados por horas para el mes de mayo de 2014?
+```{r}
+data_by_hour_minute <- data_may_2014 %>% 
+                       group_by(hour_min = hour(dmy_hms(fechainicial)), ent_sal)                        %>% summarise(cantidad = sum(cantidad))
+
+data_by_hour_minute <- transform(data_by_hour_minute, cantidad = ifelse(ent_sal == "E", cantidad * -1, cantidad))
+
+data_by_hour_minute <- data_by_hour_minute %>% 
+                       group_by(hour_min) %>% 
+                       summarise(cantidad = sum(cantidad))
+
+title <- "Cantidad de usuarios colados por hora mayo 2014"
+x_lab <- "Hora 24"
+y_lab <- "Cantidad de colados (millones)"
+ggplot(data = data_by_hour_minute, aes(x=hour_min, y=cantidad / 1000000)) +
+  geom_line() + 
+  scale_x_continuous(limits=c(0,23), breaks=c(1:24)) +
+  labs(title = title, x = x_lab, y = y_lab) +
+  theme(plot.title=element_text(size=rel(1.5), lineheight=.9, face="bold.italic")) +
+  theme_bw() +
+  theme(panel.grid.major.y = element_blank()) +
+  geom_hline(yintercept=0, color="red")
+```
+
+###9. ¿Cuál es comportamiento de colados por horas para el mes de mayo de 2014 por días?
+
+```{r}
+data_may_2014$dia <- wday(dmy_hms(data_may_2014$fechainicial), abbr = FALSE, label = TRUE)
+data_may_2014$hora <- hour(dmy_hms(data_may_2014$fechainicial))
+
+data_by_hour_day <- data_may_2014 %>% 
+                    group_by(hora, dia, ent_sal) %>% 
+                    summarise(cantidad = sum(cantidad))
+
+data_by_hour_day <- transform(data_by_hour_day, cantidad = ifelse(ent_sal == "E", cantidad * -1, cantidad))
+
+data_by_hour_day <- data_by_hour_day %>% 
+                    group_by(dia, hora) %>% 
+                    summarise(cantidad = sum(cantidad))
+title <- "Cantidad de usuarios colados por hora por días mayo 2014"
+x_lab <- "Hora 24"
+y_lab <- "Cantidad de colados (miles)"
+ggplot(data = data_by_hour_day, aes(x=hora, y=cantidad/1000)) +
+  geom_line() + 
+  scale_x_continuous(limits=c(0,23), breaks=c(1:24)) +
+  labs(title = title, x = x_lab, y = y_lab) +
+  theme(plot.title=element_text(size=rel(1.5), lineheight=.9, face="bold.italic")) +
+  theme_bw() +
+  theme(panel.grid.major.y = element_blank()) +
+  geom_hline(yintercept=0, color="red") +
+  facet_wrap(~ dia)
+```
+
+**Nota:** se pueden apreciar valores negativos, porque se presume que en un intervalo de una hora, es superior la cantidad de gente que se encuentra en transito que la que sale del sistema.
+
+###10. ¿Cuál es comportamiento de colados por horas para el mes de mayo de 2014 por días?
+
+```{r}
+data_by_hour_day <- ddply(data_by_hour_day, .(dia), transform, orden=seq_along(hora))
+
+title <- "Cantidad de usuarios colados por hora por días mayo 2014"
+x_lab <- "Hora 24"
+y_lab <- "Cantidad de colados (miles)"
+ggplot(data_by_hour_day, aes(y = cantidad / 1000, x = reorder(hora, orden), group = dia, colour = dia)) +
+      coord_polar() + 
+      geom_point() + 
+      geom_path() + 
+      labs(x = NULL) +
+      labs(title = title, x = x_lab, y = y_lab) 
+```
+
+**Nota:** se pueden apreciar valores negativos, porque se presume que en un intervalo de una hora, es superior la cantidad de gente que se encuentra en transito que la que sale del sistema.
+
+##11. ¿cuál es el flujo de salidas por estación, mes mayo 2014 (en construcción)?
+
+```{r}
+data_summary_2 <- data_may_2014 %>% 
+                  group_by(estacion, ent_sal) %>% 
+                  summarise(cantidad = sum(cantidad))
+                
+estaciones <- read_csv("C://Users//jasam//Google Drive//Laboratorios//Datascience//hackathon transmilenio//estaciones.csv")
+
+data_summary_station <- merge(data_summary_2,estaciones,by="estacion")
+
+data_ouput <- subset(data_summary_station, ent_sal == "S")
+data_ouput$cantidad <- as.character(data_ouput$cantidad)
+
+m <- leaflet(data_ouput) %>% addTiles()
+m %>% addMarkers(lng=~longitud, lat=~latitud, popup=~cantidad)
+```
